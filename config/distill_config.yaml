@@ -1,0 +1,11 @@
+# 继承基础配置
+_base_: './config.yaml'
+
+name: LAENet_distill
+distill:
+  loss_weight: 0.5  # 蒸馏损失权重
+  temperature: 2.0  # 蒸馏温度
+
+# 教师模型路径（示例）
+path:
+  teacher_model_path: ./pretrained/retinexformer.pth
