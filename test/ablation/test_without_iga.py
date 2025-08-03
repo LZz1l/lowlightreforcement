@@ -1,6 +1,6 @@
 import torch
 from models.laenet import LAENet
-from test.test_metrics import test  # 复用测试逻辑
+from test1.test_metrics import test  # 复用测试逻辑
 
 # 定义移除IGA Block的LAENet变体
 class LAENetWithoutIGA(LAENet):

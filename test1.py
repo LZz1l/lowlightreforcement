@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-from models.retinexformer import Retinexformer
+from models.modules.retinexformer import Retinexformer
 
 
 def enhance_image(low_path, model_path, save_path):

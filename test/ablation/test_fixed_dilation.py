@@ -1,7 +1,7 @@
 import torch
 from models.modules.hfrm_pro import HFRMPro
 from models.laenet import LAENet
-from test.test_metrics import test
+from test1.test_metrics import test
 
 # 定义固定空洞率的HFRM-Pro变体
 class HFRMFixed(HFRMPro):

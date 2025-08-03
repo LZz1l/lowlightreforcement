@@ -6,7 +6,7 @@ from basicsr.train import Trainer
 from basicsr.utils.options import parse_options
 from models.laenet import LAENet
 from models.retinexformer import Retinexformer  # 假设教师模型Retinexformer
-from train.losses import DistillationLoss
+from train1.losses import DistillationLoss
 from data.dataset import LAENetDataset
 
 
