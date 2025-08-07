@@ -1,0 +1,84 @@
+name: LAENet_train
+model_type: SRModel
+scale: 1
+num_gpu: 1  # 0 for CPU, 1 for single GPU, >1 for multiple GPUs
+
+datasets:
+  train:
+    name: LOLv2
+    type: LOLv2Dataset
+    dataroot: C:/Users/ASUS/OneDrive/Desktop/LOLv2
+    real: true
+    phase: train
+    batch_size_per_gpu: 8
+    num_worker_per_gpu: 4
+    use_flip: true
+    use_rot: true
+
+  val:
+    name: LOLv2_val
+    type: LOLv2Dataset
+    dataroot: C:/Users/ASUS/OneDrive/Desktop/LOLv2
+    real: true
+    phase: val
+
+network_g:
+  type: LAENet
+  num_in_ch: 3
+  num_out_ch: 3
+  base_channels: 64
+  wavelet_level: 3
+
+train:
+  manual_seed: 0
+  epochs: 50
+  val_freq: 1
+
+  optimizer_G:
+    type: Adam
+    lr: !!float 1e-4
+    weight_decay: 0
+    betas: [0.9, 0.999]
+
+  scheduler:
+    type: CosineAnnealingLR
+    T_max: 50
+    eta_min: !!float 1e-6
+
+  loss:
+    type: L1Loss
+
+  path:
+    pretrain_network_g: ~
+    strict_load: true
+    resume_state: ~
+
+  logger:
+    print_freq: 100
+    save_checkpoint_freq: 5
+    use_tb_logger: true
+    wandb:
+      project: ~
+      resume_id: ~
+
+val:
+  save_img: true
+  metrics:
+    psnr: # metric name, can be arbitrary
+      type: calculate_psnr
+      crop_border: 0
+      test_y_channel: false
+    ssim:
+      type: calculate_ssim
+      crop_border: 0
+      test_y_channel: false
+
+path:
+  root: ./
+  experiments_root: experiments/
+  results_root: results/
+  log: experiments/LAENet_train/log
+  pretrain_models: pretrain_models/
+  models: experiments/LAENet_train/models
+  images: experiments/LAENet_train/images
+  tensorboard_log: experiments/LAENet_train/tensorboard_log

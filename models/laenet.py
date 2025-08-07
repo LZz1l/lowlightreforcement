@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import pywt
-from basicsr.utils.registry import ARCH_REGISTRY
+from utils.registry import ARCH_REGISTRY
 from .modules.iga_block import IGABlock
 from .modules.hfrm_pro import HFRMPro
 
