@@ -1,11 +1,13 @@
 import torch
-from datasets.lolv2_dataset import LOLv2Dataset
-from models.retinexformer import Retinexformer
+from torch import nn
+
+from data.datasets.lolv2_dataset import LOLv2Dataset
+from models.modules.retinexformer import Retinexformer
 from torch.utils.data import DataLoader
 
 # 配置
 config = {
-    'data_root': './data/LOLv2',
+    'data_root': 'C:/Users/ASUS/OneDrive/Desktop/LOLv2',  # 你的绝对路径（注意用正斜杠或双反斜杠）
     'batch_size': 8,
     'lr': 1e-4,
     'epochs': 50,
