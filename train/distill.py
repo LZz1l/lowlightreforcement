@@ -53,7 +53,7 @@ class DistillTrainer(Trainer):
 
 def main():
     # 解析蒸馏配置（基于基础配置扩展）
-    opt = parse_options(config_path='config/distill_config.yaml', is_train=True)
+    opt = parse_options(config_path='configs/distill_config.yaml', is_train=True)
     # 初始化蒸馏训练器
     distill_trainer = DistillTrainer(opt)
     # 开始蒸馏训练
