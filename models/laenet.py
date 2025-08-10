@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-import pywt
+import torch.nn.functional as F  # 新增导入
 from utils.registry import ARCH_REGISTRY
 from .modules.iga_block import IGABlock
 from .modules.hfrm_pro import HFRMPro
@@ -23,7 +23,7 @@ class LAENet(nn.Module):
         self.decompose_L = nn.Conv2d(base_channels * 2, num_out_ch, kernel_size=3, padding=1)
         self.decompose_R = nn.Conv2d(base_channels * 2, num_out_ch, kernel_size=3, padding=1)
 
-        # 2. 小波扩散分支：处理光照分量L
+        # 2. 小波扩散分支：处理光照分量L（移除CPU小波变换，改用纯GPU操作）
         self.wavelet_processor = nn.Sequential(
             HFRMPro(num_out_ch, base_channels),  # 动态空洞残差块
             HFRMPro(base_channels, base_channels),
@@ -34,24 +34,21 @@ class LAENet(nn.Module):
         self.fusion = nn.Conv2d(num_out_ch * 2, num_out_ch, kernel_size=3, padding=1)
 
     def forward(self, x):
-        # x: 低光图像 [B, 3, H, W]
+        # x: 低光图像 [B, 3, H, W]（GPU上的tensor）
 
         # 步骤1：Retinex分解
         retinex_feat = self.retinex_encoder(x)
         L = self.decompose_L(retinex_feat)  # 光照分量
         R = self.decompose_R(retinex_feat)  # 反射分量（保留细节）
 
-        # 步骤2：小波分解+扩散（仅处理光照分量L）
-        # 小波分解（PyWavelets，CPU操作，需转为numpy）
-        L_np = L.detach().cpu().numpy()  # [B, 3, H, W]
-        wavelet_coeffs = []
-        for b in range(L_np.shape[0]):
-            for c in range(3):
-                coeffs = pywt.wavedec2(L_np[b, c], 'db4', level=self.wavelet_level)
-                wavelet_coeffs.append(coeffs)
-        # 仅对低频分量进行扩散处理（简化：这里用网络直接处理L的小波低频）
-        L_processed = self.wavelet_processor(L)  # 模拟小波域优化
+        # 约束光照分量在合理范围（避免数值不稳定）
+        L = torch.clamp(L, 0.01, 1.0)  # 光照不能过暗（>0.01）或过亮（<1.0）
+        R = torch.clamp(R, 0.0, 1.0)   # 反射率非负
+
+        # 步骤2：处理光照分量L（移除CPU小波变换，直接用网络处理）
+        L_processed = self.wavelet_processor(L)
+        L_processed = torch.clamp(L_processed, 0.01, 1.0)  # 保持光照合理性
 
         # 步骤3：融合反射分量R和优化后的光照L
         output = self.fusion(torch.cat([R, L_processed], dim=1))
-        return output  # 增强后的图像
+        return torch.clamp(output, 0.0, 1.0)  # 确保输出在[0,1]范围内
