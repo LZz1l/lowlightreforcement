@@ -46,7 +46,8 @@ train:
     eta_min: !!float 1e-6
 
   loss:
-    type: L1Loss
+    type: RetinexPerturbationLoss  # 替换为Retinex专用损失
+    loss_weight: 1.0  # 新增损失权重参数
 
   path:
     pretrain_network_g: ~

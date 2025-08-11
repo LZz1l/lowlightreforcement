@@ -5,22 +5,21 @@ from torch.utils.data import DataLoader
 from basicsr.train import Trainer
 from basicsr.utils.options import parse_options
 from models.laenet import LAENet
-from models.retinexformer import Retinexformer  # 假设教师模型Retinexformer
-from train1.losses import DistillationLoss
-from data.dataset import LAENetDataset
-
+from models.modules.retinexformer import Retinexformer
+from train.losses import DistillationLoss
+from data.datasets.lolv2_dataset import LOLv2Dataset
 
 class DistillTrainer(Trainer):
-    """蒸馏训练器，继承BasicSR的Trainer扩展"""
-
     def __init__(self, opt):
         super(DistillTrainer, self).__init__(opt)
-        # 加载教师模型（阶段1：正常光照模型蒸馏）
-        self.teacher_model = Retinexformer(pretrained=True)
+        # 加载教师模型
+        self.teacher_model = Retinexformer().to(self.device)
+        # 加载教师模型权重（假设已预训练）
+        teacher_ckpt = torch.load(opt['distill']['teacher_pretrain_path'], map_location=self.device)
+        self.teacher_model.load_state_dict(teacher_ckpt['params'])
         self.teacher_model.eval()
-        self.teacher_model = self.teacher_model.to(self.device)
         for param in self.teacher_model.parameters():
-            param.requires_grad = False  # 冻结教师模型
+            param.requires_grad = False
 
         # 蒸馏损失
         self.distill_loss = DistillationLoss(
@@ -31,32 +30,28 @@ class DistillTrainer(Trainer):
     def feed_data(self, data):
         self.lq = data['lq'].to(self.device)
         self.gt = data['gt'].to(self.device)
-        # 教师模型输出（用于蒸馏）
+        # 提取教师模型中间特征（修正：使用教师模型的conv_in输出作为特征）
         with torch.no_grad():
-            self.teacher_feat = self.teacher_model.extract_feat(self.lq)  # 提取教师特征
+            self.teacher_feat = self.teacher_model.conv_in(self.lq)  # 取第一层卷积特征
 
     def optimize_parameters(self, current_iter):
-        # 学生模型前向传播
-        self.student_feat = self.net_g.extract_feat(self.lq)  # 需在LAENet中实现extract_feat方法
+        # 学生模型提取特征（取retinex_encoder的第一层输出）
+        student_feat = self.net_g.retinex_encoder[0](self.lq)  # LAENet的第一层卷积
         self.output = self.net_g(self.lq)
 
-        # 计算损失（原任务损失+蒸馏损失）
-        self.loss_total = self.loss(self.output, self.gt)  # 原损失（L1+感知损失）
-        self.loss_distill = self.distill_loss(self.student_feat, self.teacher_feat)
-        self.loss_total += self.loss_distill
+        # 计算总损失（原任务损失+蒸馏损失）
+        task_loss = self.loss(self.output, self.gt)  # 原任务损失（如L1）
+        distill_loss = self.distill_loss(student_feat, self.teacher_feat)
+        self.loss_total = task_loss + distill_loss
 
-        # 反向传播
         self.optimizer_g.zero_grad()
         self.loss_total.backward()
-        self.optimizer_g.step()
+        self.optimizer.step()
 
 
 def main():
-    # 解析蒸馏配置（基于基础配置扩展）
-    opt = parse_options(config_path='configs/distill_config.yaml', is_train=True)
-    # 初始化蒸馏训练器
+    opt = parse_options(config_path='config/distill_config.yaml', is_train=True)
     distill_trainer = DistillTrainer(opt)
-    # 开始蒸馏训练
     distill_trainer.train()
 
 
