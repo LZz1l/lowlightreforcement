@@ -1,5 +1,5 @@
-# 从当前目录导入registry模块
-from . import registry
+# 从当前目录导入所有工具模块
+from . import registry, attention, deployment, wavelet
 
-# 声明对外暴露的模块，这样其他文件可以直接通过from utils import registry导入
-__all__ = ['registry']
+# 声明对外暴露的模块，统一接口
+__all__ = ['registry', 'attention', 'deployment', 'wavelet']
