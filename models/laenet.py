@@ -1,12 +1,12 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F  # 新增导入
-from utils.registry import Registry
+from utils.registry import ARCH_REGISTRY
 from .modules.iga_block import IGABlock
 from .modules.hfrm_pro import HFRMPro
 
 
-@Registry.register()
+@ARCH_REGISTRY.register()
 class LAENet(nn.Module):
     def __init__(self, num_in_ch=3, num_out_ch=3,
                  base_channels=64, wavelet_level=3):
@@ -52,3 +52,4 @@ class LAENet(nn.Module):
         # 步骤3：融合反射分量R和优化后的光照L
         output = self.fusion(torch.cat([R, L_processed], dim=1))
         return torch.clamp(output, 0.0, 1.0)  # 确保输出在[0,1]范围内
+
