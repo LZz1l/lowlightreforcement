@@ -1,12 +1,12 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F  # 新增导入
-from utils.registry import ARCH_REGISTRY
+from utils.registry import Registry
 from .modules.iga_block import IGABlock
 from .modules.hfrm_pro import HFRMPro
 
 
-@ARCH_REGISTRY.register()
+@Registry.register()
 class LAENet(nn.Module):
     def __init__(self, num_in_ch=3, num_out_ch=3,
                  base_channels=64, wavelet_level=3):
