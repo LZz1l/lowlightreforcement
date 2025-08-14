@@ -29,7 +29,7 @@ criterion = RetinexPerturbationLoss(loss_weight=1.0)  # 使用Retinex专用损�
 train_dataset = LOLv2Dataset(config['data_root'], phase='train', real=True)
 train_loader = DataLoader(train_dataset, batch_size=config['batch_size'], shuffle=True)
 
-val_dataset = LOLv2Dataset(config['data_root'], phase='val', real=True)
+val_dataset = LOLv2Dataset(config['data_root'], phase='test', real=True)  # 用test代替val
 val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
 
 # 训练循环
