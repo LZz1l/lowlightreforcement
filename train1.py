@@ -34,20 +34,17 @@ criterion = RetinexPerturbationLoss(loss_weight=1.0)
 # 数据加载（添加resize参数统一图像尺寸）
 train_dataset = LOLv2Dataset(
     config['data_root'],
-    phase='train',
-    real=True,
-    resize=config['image_size']  # 统一训练集尺寸
+    phase='train',  # 训练集用'train'（匹配数据集的train文件夹）
+    real=True
 )
 train_loader = DataLoader(train_dataset, batch_size=config['batch_size'], shuffle=True)
 
 val_dataset = LOLv2Dataset(
     config['data_root'],
-    phase='val',
-    real=True,
-    resize=config['image_size']  # 统一验证集尺寸
+    phase='Test',  # 验证集用'Test'（匹配数据集的Test文件夹）
+    real=True
 )
 val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
-
 # 训练循环
 best_val_loss = float('inf')  # 初始化最佳验证损失
 for epoch in range(config['epochs']):
