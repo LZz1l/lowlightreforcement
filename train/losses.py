@@ -1,8 +1,9 @@
 import torch
 import torch.nn as nn
-from basicsr.utils.registry import LOSS_REGISTRY
-from basicsr.losses.losses import L1Loss, PerceptualLoss  # 复用BasicSR基础损失
-
+# 修正：从项目根目录的utils导入注册器（你的自定义注册器）
+from utils.registry import LOSS_REGISTRY  # 关键修正：去掉basicsr前缀
+# 注意：如果L1Loss等基础损失也在你的项目内，需同步修正路径
+from utils.losses import L1Loss, PerceptualLoss  # 假设基础损失在utils下，根据实际路径调整
 
 @LOSS_REGISTRY.register()
 class RetinexPerturbationLoss(nn.Module):
