@@ -4,13 +4,16 @@ import torch
 from torch.utils.data import Dataset
 import numpy as np
 from natsort import natsorted
+# 导入数据增强函数
+from data.augment import random_crop, random_flip, random_rot90
 
 
 class LOLv2Dataset(Dataset):
-    def __init__(self, root_dir, phase='train', real=True, transform=None):
+    def __init__(self, root_dir, phase='train', real=True, transform=None, resize=None):
         self.root_dir = root_dir
         self.phase = phase
         self.transform = transform
+        self.resize = resize  # 新增：目标尺寸 (h, w)，如(256, 256)
         data_type = 'Real_captured' if real else 'Synthetic'
 
         # 构建路径并验证存在性
@@ -51,9 +54,26 @@ class LOLv2Dataset(Dataset):
         assert low_img.shape[:2] == gt_img.shape[:2], \
             f"图像尺寸不匹配: {low_path} ({low_img.shape[:2]}) 与 {gt_path} ({gt_img.shape[:2]})"
 
-        # 转为RGB并归一化到[0,1]（确保float32类型）
+        # 转为RGB并归一化到[0,1]（保持numpy数组格式用于后续处理）
         low_img = cv2.cvtColor(low_img, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
         gt_img = cv2.cvtColor(gt_img, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+
+        # 调整尺寸（如果指定了resize）
+        if self.resize is not None:
+            h, w = self.resize
+            low_img = cv2.resize(low_img, (w, h), interpolation=cv2.INTER_AREA)
+            gt_img = cv2.resize(gt_img, (w, h), interpolation=cv2.INTER_AREA)
+
+        # 训练阶段应用数据增强
+        if self.phase == 'train':
+            # 随机裁剪（如果需要比resize更小的尺寸增强）
+            if self.resize is not None:
+                crop_size = min(self.resize[0], self.resize[1]) // 2  # 裁剪尺寸为resize的一半
+                if crop_size > 0:
+                    low_img, gt_img = random_crop(low_img, gt_img, crop_size)
+            # 随机翻转和旋转
+            low_img, gt_img = random_flip(low_img, gt_img)
+            low_img, gt_img = random_rot90(low_img, gt_img)
 
         # 检查通道数（确保3通道）
         assert low_img.ndim == 3 and low_img.shape[2] == 3, \
