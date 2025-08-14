@@ -1,55 +1,55 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F  # 新增导入
-from utils.registry import ARCH_REGISTRY
-from .modules.iga_block import IGABlock
-from .modules.hfrm_pro import HFRMPro
+from utils.registry import ARCH_REGISTRY  # 导入自定义注册器
+from models.modules.iga_block import IGABlock  # 导入优化后的注意力模块
 
 
-@ARCH_REGISTRY.register()
+@ARCH_REGISTRY.register()  # 使用自定义注册器
 class LAENet(nn.Module):
-    def __init__(self, num_in_ch=3, num_out_ch=3,
-                 base_channels=64, wavelet_level=3):
-        super(LAENet, self).__init__()
-        self.wavelet_level = wavelet_level
+    """低光增强网络LAENet"""
 
-        # 1. Retinex分支：分解光照L和反射R
+    def __init__(self, base_channels=32):
+        super().__init__()
+        # 编码器（Retinex分解）
         self.retinex_encoder = nn.Sequential(
-            nn.Conv2d(num_in_ch, base_channels, kernel_size=3, padding=1),
-            IGABlock(base_channels),  # 全局注意力块
-            nn.Conv2d(base_channels, base_channels * 2, kernel_size=3, stride=2, padding=1)
-        )
-        # 输出光照分量L和反射分量R
-        self.decompose_L = nn.Conv2d(base_channels * 2, num_out_ch, kernel_size=3, padding=1)
-        self.decompose_R = nn.Conv2d(base_channels * 2, num_out_ch, kernel_size=3, padding=1)
-
-        # 2. 小波扩散分支：处理光照分量L（移除CPU小波变换，改用纯GPU操作）
-        self.wavelet_processor = nn.Sequential(
-            HFRMPro(num_out_ch, base_channels),  # 动态空洞残差块
-            HFRMPro(base_channels, base_channels),
-            nn.Conv2d(base_channels, num_out_ch, kernel_size=3, padding=1)
+            nn.Conv2d(3, base_channels, kernel_size=3, padding=1),
+            nn.ReLU(),
+            IGABlock(base_channels),  # 使用内存优化的注意力模块
+            nn.Conv2d(base_channels, base_channels * 2, kernel_size=3, stride=2, padding=1),
+            nn.ReLU(),
+            IGABlock(base_channels * 2)
         )
 
-        # 3. 融合模块：整合R和优化后的L
-        self.fusion = nn.Conv2d(num_out_ch * 2, num_out_ch, kernel_size=3, padding=1)
+        # 光照分量分解
+        self.decompose_L = nn.Sequential(
+            nn.Conv2d(base_channels * 2, base_channels, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Upsample(scale_factor=2, mode='bilinear'),
+            nn.Conv2d(base_channels, 3, kernel_size=3, padding=1),
+            nn.Sigmoid()  # 光照分量在[0,1]
+        )
+
+        # 反射分量分解
+        self.decompose_R = nn.Sequential(
+            nn.Conv2d(base_channels * 2, base_channels, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Upsample(scale_factor=2, mode='bilinear'),
+            nn.Conv2d(base_channels, 3, kernel_size=3, padding=1),
+            nn.Sigmoid()  # 反射分量在[0,1]
+        )
+
+        # 最终增强输出
+        self.enhance_head = nn.Sequential(
+            nn.Conv2d(6, base_channels, kernel_size=3, padding=1),  # 融合L和R
+            nn.ReLU(),
+            nn.Conv2d(base_channels, 3, kernel_size=3, padding=1),
+            nn.Sigmoid()
+        )
 
     def forward(self, x):
-        # x: 低光图像 [B, 3, H, W]（GPU上的tensor）
-
-        # 步骤1：Retinex分解
-        retinex_feat = self.retinex_encoder(x)
+        # 输入x: 低光图像 [B,3,H,W]
+        retinex_feat = self.retinex_encoder(x)  # 特征提取
         L = self.decompose_L(retinex_feat)  # 光照分量
-        R = self.decompose_R(retinex_feat)  # 反射分量（保留细节）
-
-        # 约束光照分量在合理范围（避免数值不稳定）
-        L = torch.clamp(L, 0.01, 1.0)  # 光照不能过暗（>0.01）或过亮（<1.0）
-        R = torch.clamp(R, 0.0, 1.0)   # 反射率非负
-
-        # 步骤2：处理光照分量L（移除CPU小波变换，直接用网络处理）
-        L_processed = self.wavelet_processor(L)
-        L_processed = torch.clamp(L_processed, 0.01, 1.0)  # 保持光照合理性
-
-        # 步骤3：融合反射分量R和优化后的光照L
-        output = self.fusion(torch.cat([R, L_processed], dim=1))
-        return torch.clamp(output, 0.0, 1.0)  # 确保输出在[0,1]范围内
-
+        R = self.decompose_R(retinex_feat)  # 反射分量
+        output = self.enhance_head(torch.cat([L, R], dim=1))  # 融合输出
+        return output

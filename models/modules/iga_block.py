@@ -27,25 +27,24 @@ class IGABlock(nn.Module):
         )
 
     def forward(self, x):
-        # x: [B, dim, H, W]
         B, C, H, W = x.shape
-        assert C == self.dim, f"输入通道数{C}与模块维度{self.dim}不匹配"
+        # 添加下采样减少空间维度（例如缩小为1/2）
+        x_down = F.interpolate(x, size=(H // 2, W // 2), mode='bilinear', align_corners=False)
+        B, C, H_down, W_down = x_down.shape  # 新的尺寸
 
-        # IG-MSA注意力
-        qkv = self.qkv(x).reshape(B, 3, self.num_heads, self.head_dim, H * W).permute(1, 0, 2, 4, 3)
-        q, k, v = qkv[0], qkv[1], qkv[2]  # [B, heads, N, head_dim]，N=H*W
-        attn = (q @ k.transpose(-2, -1)) * (self.head_dim ** -0.5)  # 缩放点积注意力
-        attn = self.attn_softmax(attn)
-        attn_out = (attn @ v).transpose(2, 3).reshape(B, C, H, W)  # 重组为[B, C, H, W]
+        # 后续注意力计算基于下采样后的特征图
+        qkv = self.qkv(x_down).reshape(B, H_down * W_down, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1,
+                                                                                                           4)
+        q, k, v = qkv.unbind(0)  # 每个形状为 [B, num_heads, H_down*W_down, head_dim]
 
-        # 残差+通道混洗
-        x = x + attn_out  # 残差连接
-        x = self.channel_shuffle(x)  # 通道混洗
-        # LayerNorm：需将通道维度放到最后 [B, H, W, C]
-        x = x.permute(0, 2, 3, 1)
-        x = self.norm(x)
-        x = x.permute(0, 3, 1, 2)  # 恢复为[B, C, H, W]
+        attn = (q @ k.transpose(-2, -1)) * (self.head_dim ** -0.5)  # 此时H*W变为原来的1/4，内存需求大幅降低
+        attn = attn.softmax(dim=-1)
+        attn = self.attn_drop(attn)
 
-        # FFN
-        x = x + self.ffn(x)  # 残差连接
+        x_attn = (attn @ v).transpose(1, 2).reshape(B, H_down, W_down, C)
+        x_attn = x_attn.permute(0, 3, 1, 2)  # [B, C, H_down, W_down]
+        # 上采样回原始尺寸
+        x_attn = F.interpolate(x_attn, size=(H, W), mode='bilinear', align_corners=False)
+
+        x = x + self.proj_drop(self.proj(x_attn))
         return x

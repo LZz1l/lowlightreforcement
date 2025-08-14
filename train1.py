@@ -1,79 +1,109 @@
-import os  # 移至开头统一导入
+import os
+import sys
 import torch
-from torch import nn
-
-from data.datasets.lolv2_dataset import LOLv2Dataset
-from models.laenet import LAENet  # 替换为目标模型LAENet
+import torch.optim as optim
 from torch.utils.data import DataLoader
-from train.losses import RetinexPerturbationLoss  # 导入专用损失
+from tqdm import tqdm
 
-# 配置
-config = {
-    'data_root': 'C:/Users/ASUS/OneDrive/Desktop/LOLv2',
-    'batch_size': 8,
-    'lr': 1e-4,
-    'epochs': 50,
-    'save_dir': './checkpoints'
-}
+# 添加项目根目录到搜索路径
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# 创建保存目录
-os.makedirs(config['save_dir'], exist_ok=True)
+# 导入自定义模块
+from data.datasets.lolv2_dataset import LOLv2Dataset
+from models.laenet import LAENet
+from train.losses import RetinexPerturbationLoss
+from torch.cuda.amp import GradScaler, autocast  # 混合精度训练
 
-# 初始化
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = LAENet().to(device)  # 实例化LAENet
-optimizer = torch.optim.Adam(model.parameters(), lr=config['lr'])
-criterion = RetinexPerturbationLoss(loss_weight=1.0)  # 使用Retinex专用损失
 
-# 数据加载
-train_dataset = LOLv2Dataset(config['data_root'], phase='train', real=True)
-train_loader = DataLoader(train_dataset, batch_size=config['batch_size'], shuffle=True)
+def main():
+    # 配置参数（内存优化）
+    config = {
+        'data_root': 'C:/Users/ASUS/OneDrive/Desktop/LOLv2',  # 数据集路径
+        'batch_size': 2,  # 减小批量大小
+        'epochs': 50,
+        'lr': 1e-4,
+        'img_size': (256, 256),  # 降低分辨率
+        'device': 'cuda' if torch.cuda.is_available() else 'cpu'
+    }
+    print(f"使用设备: {config['device']}")
 
-val_dataset = LOLv2Dataset(config['data_root'], phase='test', real=True)  # 用test代替val
-val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
+    # 1. 加载数据集（添加缩放）
+    train_dataset = LOLv2Dataset(
+        config['data_root'],
+        phase='train',
+        real=True,
+        resize=config['img_size']
+    )
+    val_dataset = LOLv2Dataset(
+        config['data_root'],
+        phase='test',  # 使用test作为验证集
+        real=True,
+        resize=config['img_size']
+    )
 
-# 训练循环
-for epoch in range(config['epochs']):
-    model.train()
-    train_loss = 0.0
+    train_loader = DataLoader(train_dataset, batch_size=config['batch_size'], shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
 
-    for batch in train_loader:
-        low = batch['low'].to(device)
-        gt = batch['gt'].to(device)
+    # 2. 初始化模型、损失函数、优化器
+    model = LAENet(base_channels=32).to(config['device'])  # 减小通道数
+    criterion = RetinexPerturbationLoss(loss_weight=1.0).to(config['device'])
+    optimizer = optim.Adam(model.parameters(), lr=config['lr'])
 
-        # LAENet输出增强图像，同时需要获取L和R用于损失计算
-        output = model(low)
-        # 从模型中提取L和R（需在LAENet中添加属性存储中间结果）
-        L = model.decompose_L(model.retinex_encoder(low))  # 补充获取光照分量
-        R = model.decompose_R(model.retinex_encoder(low))  # 补充获取反射分量
+    # 3. 混合精度训练配置
+    scaler = GradScaler()
 
-        # 计算Retinex损失（输入L、R和原始低光图）
-        loss = criterion(L, R, low)
+    # 4. 训练循环
+    for epoch in range(config['epochs']):
+        model.train()
+        train_loss = 0.0
 
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        # 训练
+        for batch in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{config['epochs']}"):
+            low = batch['low'].to(config['device'])
+            gt = batch['gt'].to(config['device'])
 
-        train_loss += loss.item() * low.size(0)
+            optimizer.zero_grad()
 
-    avg_train_loss = train_loss / len(train_dataset)
+            # 启用混合精度
+            with autocast():
+                output = model(low)
+                # 分解光照和反射分量
+                retinex_feat = model.retinex_encoder(low)
+                L = model.decompose_L(retinex_feat)
+                R = model.decompose_R(retinex_feat)
+                loss = criterion(L, R, low)  # 使用Retinex损失
 
-    # 验证过程
-    model.eval()
-    val_loss = 0.0
-    with torch.no_grad():
-        for batch in val_loader:
-            low = batch['low'].to(device)
-            gt = batch['gt'].to(device)
-            output = model(low)
-            # 验证时用L1损失评估增强效果
-            val_loss += nn.L1Loss()(output, gt).item() * low.size(0)
+            # 缩放损失并反向传播
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
 
-    avg_val_loss = val_loss / len(val_dataset)
+            train_loss += loss.item() * low.size(0)
 
-    print(f'Epoch {epoch + 1}/{config["epochs"]}, '
-          f'Train Loss: {avg_train_loss:.4f}, '
-          f'Val Loss: {avg_val_loss:.4f}')
+        # 计算平均训练损失
+        avg_train_loss = train_loss / len(train_dataset)
+        print(f"Epoch {epoch + 1}, 训练损失: {avg_train_loss:.4f}")
 
-    # 保存模型（统一格式：包含params键，与测试代码匹配）
-    torch.save({'params': model.state_dict()}, f'{config["save_dir"]}/epoch_{epoch + 1}.pth')
+        # 验证（简化版）
+        model.eval()
+        val_loss = 0.0
+        with torch.no_grad():
+            for batch in val_loader:
+                low = batch['low'].to(config['device'])
+                with autocast():
+                    retinex_feat = model.retinex_encoder(low)
+                    L = model.decompose_L(retinex_feat)
+                    R = model.decompose_R(retinex_feat)
+                    loss = criterion(L, R, low)
+                val_loss += loss.item()
+
+        avg_val_loss = val_loss / len(val_dataset)
+        print(f"Epoch {epoch + 1}, 验证损失: {avg_val_loss:.4f}\n")
+
+        # 保存模型
+        os.makedirs('checkpoints', exist_ok=True)
+        torch.save(model.state_dict(), f"checkpoints/epoch_{epoch + 1}.pth")
+
+
+if __name__ == '__main__':
+    main()
