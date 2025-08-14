@@ -2,7 +2,7 @@ import torch
 from torch import nn as nn
 from torch.nn import functional as F
 import numpy as np
-
+from torchvision import models
 from basicsr.models.losses.loss_util import weighted_loss
 
 _reduction_modes = ['none', 'mean', 'sum']
@@ -120,7 +120,101 @@ class CharbonnierLoss(nn.Module):
         # loss = torch.sum(torch.sqrt(diff * diff + self.eps))
         loss = torch.mean(torch.sqrt((diff * diff) + (self.eps*self.eps)))
         return loss
+class PerceptualLoss(nn.Module):
+    """感知损失：基于预训练VGG网络的特征差异损失"""
 
+    def __init__(self,
+                 loss_weight=1.0,
+                 vgg_type='vgg19',
+                 use_input_norm=True,
+                 perceptual_weight=1.0,
+                 style_weight=0.0,
+                 norm_img=True):
+        super(PerceptualLoss, self).__init__()
+        self.loss_weight = loss_weight
+        self.perceptual_weight = perceptual_weight
+        self.style_weight = style_weight
+        self.norm_img = norm_img  # 是否将输入归一化到[0, 255]
+
+        # 图像归一化参数（ImageNet均值和标准差）
+        self.mean = torch.Tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
+        self.std = torch.Tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
+
+        # 加载预训练VGG网络
+        if vgg_type == 'vgg19':
+            vgg = models.vgg19(pretrained=True)
+            # 选择VGG19的特征层（通常使用这些层的输出作为感知特征）
+            self.feature_layers = [2, 7, 12, 21, 30]  # conv1_1, conv2_1, conv3_1, conv4_1, conv5_1
+        elif vgg_type == 'vgg16':
+            vgg = models.vgg16(pretrained=True)
+            self.feature_layers = [2, 7, 12, 19, 26]
+        else:
+            raise ValueError(f"不支持的VGG类型: {vgg_type}")
+
+        # 构建特征提取器（截取VGG的前半部分）
+        self.vgg = nn.Sequential(*list(vgg.features.children())[:max(self.feature_layers) + 1])
+        for param in self.vgg.parameters():
+            param.requires_grad = False  # 冻结VGG参数
+
+        self.use_input_norm = use_input_norm
+        if self.use_input_norm:
+            # 输入标准化层
+            self.input_norm = nn.BatchNorm2d(3, affine=False)
+
+    def forward(self, x, gt):
+        """
+        Args:
+            x: 生成图像 [B, 3, H, W]，范围通常为[0, 1]
+            gt: 真实图像 [B, 3, H, W]，范围通常为[0, 1]
+        """
+        # 归一化图像到[0, 255]（如果需要）
+        if self.norm_img:
+            x = x * 255.0
+            gt = gt * 255.0
+
+        # 标准化（匹配VGG训练时的输入分布）
+        x = (x - self.mean.to(x.device)) / self.std.to(x.device)
+        gt = (gt - self.mean.to(gt.device)) / self.std.to(gt.device)
+
+        if self.use_input_norm:
+            x = self.input_norm(x)
+            gt = self.input_norm(gt)
+
+        # 提取特征
+        x_feats = []
+        gt_feats = []
+        for i, layer in enumerate(self.vgg):
+            x = layer(x)
+            gt = layer(gt)
+            if i in self.feature_layers:
+                x_feats.append(x)
+                gt_feats.append(gt)
+
+        # 计算感知损失（特征L1差异）
+        perceptual_loss = 0.0
+        for x_feat, gt_feat in zip(x_feats, gt_feats):
+            perceptual_loss += F.l1_loss(x_feat, gt_feat)
+
+        # 计算风格损失（可选，特征gram矩阵差异）
+        style_loss = 0.0
+        if self.style_weight > 0:
+            for x_feat, gt_feat in zip(x_feats, gt_feats):
+                x_gram = self._gram_matrix(x_feat)
+                gt_gram = self._gram_matrix(gt_feat)
+                style_loss += F.l1_loss(x_gram, gt_gram)
+
+        # 总损失
+        total_loss = (self.perceptual_weight * perceptual_loss +
+                     self.style_weight * style_loss) * self.loss_weight
+        return total_loss
+
+    @staticmethod
+    def _gram_matrix(x):
+        """计算特征图的Gram矩阵（用于风格损失）"""
+        b, c, h, w = x.size()
+        x = x.view(b, c, h * w)
+        gram = torch.bmm(x, x.transpose(1, 2)) / (c * h * w)  # 归一化
+        return gram
 # def gradient(input_tensor, direction):
 #     smooth_kernel_x = torch.reshape(torch.tensor([[0, 0], [-1, 1]], dtype=torch.float32), [2, 2, 1, 1])
 #     smooth_kernel_y = torch.transpose(smooth_kernel_x, 0, 1)
