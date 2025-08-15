@@ -23,12 +23,13 @@ def random_flip(lq_img, gt_img, prob=0.5):
     """随机水平/垂直翻转（确保操作一致性）"""
     # 水平翻转
     if random.random() < prob:
-        lq_img = lq_img[:, ::-1, ...].copy()  # 加copy避免负步长导致的视图问题
-        gt_img = gt_img[:, ::-1, ...].copy()
-    # 垂直翻转
+            # 水平翻转后立即复制
+            lq_img = lq_img[:, ::-1, ...].copy()  # 关键：添加.copy()
+            gt_img = gt_img[:, ::-1, ...].copy()
     if random.random() < prob:
-        lq_img = lq_img[::-1, :, ...].copy()
-        gt_img = gt_img[::-1, :, ...].copy()
+            # 垂直翻转后立即复制
+            lq_img = lq_img[::-1, :, ...].copy()  # 关键：添加.copy()
+            gt_img = gt_img[::-1, :, ...].copy()
     return lq_img, gt_img
 
 
@@ -36,8 +37,8 @@ def random_rot90(lq_img, gt_img, prob=0.5):
     """随机旋转90度倍数（确保维度一致性）"""
     if random.random() < prob:
         k = random.randint(1, 3)  # 90/180/270度
-        lq_img = np.rot90(lq_img, k=k, axes=(0, 1))  # 明确指定旋转轴（H,W）
-        gt_img = np.rot90(gt_img, k=k, axes=(0, 1))
+        lq_img = np.rot90(lq_img, k=k, axes=(0, 1)).copy()  # 明确指定旋转轴（H,W）
+        gt_img = np.rot90(gt_img, k=k, axes=(0, 1)).copy()
     return lq_img, gt_img
 
 

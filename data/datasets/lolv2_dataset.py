@@ -55,10 +55,10 @@ class LOLv2Dataset(Dataset):
             f"图像尺寸不匹配: {low_path} ({low_img.shape[:2]}) 与 {gt_path} ({gt_img.shape[:2]})"
 
         # 转为RGB并归一化到[0,1]（保持numpy数组格式用于后续处理）
-        low_img = cv2.cvtColor(low_img, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
-        low_img = low_img.copy()  # 消除负步长
-        gt_img = cv2.cvtColor(gt_img, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
-        gt_img = gt_img.copy()
+        low_img = low_img.transpose(2, 0, 1).copy()  # 先转置再复制，确保连续内存
+        gt_img = gt_img.transpose(2, 0, 1).copy()
+        low_img = torch.from_numpy(low_img)
+        gt_img = torch.from_numpy(gt_img)
 
         # 调整尺寸（如果指定了resize）
         if self.resize is not None:
