@@ -56,7 +56,9 @@ class LOLv2Dataset(Dataset):
 
         # 转为RGB并归一化到[0,1]（保持numpy数组格式用于后续处理）
         low_img = cv2.cvtColor(low_img, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+        low_img = low_img.copy()  # 消除负步长
         gt_img = cv2.cvtColor(gt_img, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+        gt_img = gt_img.copy()
 
         # 调整尺寸（如果指定了resize）
         if self.resize is not None:
