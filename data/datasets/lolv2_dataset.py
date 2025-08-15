@@ -1,19 +1,19 @@
 import os
 import cv2
 import torch
-from torch.utils.data import Dataset
 import numpy as np
 from natsort import natsorted
-# 导入数据增强函数
-from data.augment import random_crop, random_flip, random_rot90
+from torch.utils.data import Dataset
 
+# 假设random_crop、random_flip、random_rot90在data.augment中定义
+from data.augment import random_crop, random_flip, random_rot90
 
 class LOLv2Dataset(Dataset):
     def __init__(self, root_dir, phase='train', real=True, transform=None, resize=None):
         self.root_dir = root_dir
         self.phase = phase
         self.transform = transform
-        self.resize = resize  # 新增：目标尺寸 (h, w)，如(256, 256)
+        self.resize = resize  # 目标尺寸 (h, w)，如(256, 256)
         data_type = 'Real_captured' if real else 'Synthetic'
 
         # 构建路径并验证存在性
@@ -41,8 +41,8 @@ class LOLv2Dataset(Dataset):
         low_path = os.path.join(self.low_dir, self.low_images[idx])
         gt_path = os.path.join(self.gt_dir, self.gt_images[idx])
 
-        low_img = cv2.imread(low_path)
-        gt_img = cv2.imread(gt_path)
+        low_img = cv2.imread(low_path)  # 读取为HWC格式（BGR）
+        gt_img = cv2.imread(gt_path)    # 读取为HWC格式（BGR）
 
         # 检查图像读取是否成功
         if low_img is None:
@@ -54,15 +54,18 @@ class LOLv2Dataset(Dataset):
         assert low_img.shape[:2] == gt_img.shape[:2], \
             f"图像尺寸不匹配: {low_path} ({low_img.shape[:2]}) 与 {gt_path} ({gt_img.shape[:2]})"
 
-        # 转为RGB并归一化到[0,1]（保持numpy数组格式用于后续处理）
-        low_img = low_img.transpose(2, 0, 1).copy()  # 先转置再复制，确保连续内存
-        gt_img = gt_img.transpose(2, 0, 1).copy()
-        low_img = torch.from_numpy(low_img)
-        gt_img = torch.from_numpy(gt_img)
+        # 转为RGB（cv2默认BGR），保持HWC格式的numpy数组
+        low_img = cv2.cvtColor(low_img, cv2.COLOR_BGR2RGB)
+        gt_img = cv2.cvtColor(gt_img, cv2.COLOR_BGR2RGB)
+
+        # 归一化到[0,1]
+        low_img = low_img.astype(np.float32) / 255.0
+        gt_img = gt_img.astype(np.float32) / 255.0
 
         # 调整尺寸（如果指定了resize）
         if self.resize is not None:
             h, w = self.resize
+            # cv2.resize需要HWC格式，输出也是HWC
             low_img = cv2.resize(low_img, (w, h), interpolation=cv2.INTER_AREA)
             gt_img = cv2.resize(gt_img, (w, h), interpolation=cv2.INTER_AREA)
 
@@ -73,7 +76,7 @@ class LOLv2Dataset(Dataset):
                 crop_size = min(self.resize[0], self.resize[1]) // 2  # 裁剪尺寸为resize的一半
                 if crop_size > 0:
                     low_img, gt_img = random_crop(low_img, gt_img, crop_size)
-            # 随机翻转和旋转
+            # 随机翻转和旋转（此时仍是HWC格式的numpy数组）
             low_img, gt_img = random_flip(low_img, gt_img)
             low_img, gt_img = random_rot90(low_img, gt_img)
 
@@ -83,9 +86,9 @@ class LOLv2Dataset(Dataset):
         assert gt_img.ndim == 3 and gt_img.shape[2] == 3, \
             f"正常光图像不是3通道: {gt_path} (shape: {gt_img.shape})"
 
-        # 转为Tensor (HWC -> CHW)
-        low_img = torch.from_numpy(low_img.transpose(2, 0, 1))
-        gt_img = torch.from_numpy(gt_img.transpose(2, 0, 1))
+        # 转为Tensor并调整为CHW格式（通道在前）
+        low_img = torch.from_numpy(low_img.transpose(2, 0, 1))  # HWC -> CHW
+        gt_img = torch.from_numpy(gt_img.transpose(2, 0, 1))    # HWC -> CHW
 
         sample = {'low': low_img, 'gt': gt_img, 'low_path': low_path, 'gt_path': gt_path}
 
