@@ -15,7 +15,7 @@ config = {
     'lr': 1e-4,
     'epochs': 50,
     'save_dir': './checkpoints',
-    'image_size': (256, 256)  # 新增图像尺寸配置
+    'image_size': (256, 256)  # 正方形尺寸，旋转后尺寸不变
 }
 
 # 创建保存目录
@@ -34,15 +34,17 @@ criterion = RetinexPerturbationLoss(loss_weight=1.0)
 # 数据加载（添加resize参数统一图像尺寸）
 train_dataset = LOLv2Dataset(
     config['data_root'],
-    phase='train',  # 训练集用'train'（匹配数据集的train文件夹）
-    real=True
+    phase='train',
+    real=True,
+    resize=config['image_size']  # 传入统一尺寸
 )
 train_loader = DataLoader(train_dataset, batch_size=config['batch_size'], shuffle=True)
 
 val_dataset = LOLv2Dataset(
     config['data_root'],
-    phase='Test',  # 验证集用'Test'（匹配数据集的Test文件夹）
-    real=True
+    phase='Test',
+    real=True,
+    resize=config['image_size']  # 传入统一尺寸
 )
 val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
 # 训练循环
