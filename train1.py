@@ -6,7 +6,7 @@ from basicsr.metrics import calculate_psnr, calculate_ssim  # 新增指标计算
 
 from data.datasets.lolv2_dataset import LOLv2Dataset
 from models.laenet import LAENet
-from train.losses import RetinexPerturbationLoss
+from train.losses import RetinexLoss
 
 # 配置参数
 config = {
@@ -29,7 +29,7 @@ optimizer = torch.optim.Adam(model.parameters(), lr=config['lr'])
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
     optimizer, T_max=config['epochs'], eta_min=1e-6
 )
-criterion = RetinexPerturbationLoss(loss_weight=1.0)
+criterion = RetinexLoss(alpha=0.5, beta=0.5).to(device)
 
 # 数据加载（添加resize参数统一图像尺寸）
 train_dataset = LOLv2Dataset(
@@ -63,7 +63,7 @@ for epoch in range(config['epochs']):
         R = model.R  # 直接从模型获取反射分量（需LAENet支持）
 
         # 计算损失并反向传播
-        loss = criterion(L, R, low)
+        loss = criterion(L, R, low,gt)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()

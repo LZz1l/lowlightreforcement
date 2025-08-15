@@ -3,30 +3,42 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-class RetinexPerturbationLoss(nn.Module):
-    """Retinex理论损失函数（带尺寸检查）"""
+class RetinexLoss(nn.Module):
+    def __init__(self, alpha=0.5, beta=0.5):
+        super(RetinexLoss, self).__init__()
+        self.alpha = alpha  # 光照平滑损失权重
+        self.beta = beta  # 反射保真损失权重
+        self.l1_loss = nn.L1Loss()
 
-    def __init__(self, loss_weight=1.0):
-        super().__init__()
-        self.loss_weight = loss_weight
-        self.l1 = nn.L1Loss()
+        # 定义Sobel算子（用于梯度计算，保持尺寸）
+        self.sobel_x = torch.tensor([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]],
+                                    dtype=torch.float32).view(1, 1, 3, 3)  # x方向（水平梯度）
+        self.sobel_y = torch.tensor([[-1, -2, -1], [0, 0, 0], [1, 2, 1]],
+                                    dtype=torch.float32).view(1, 1, 3, 3)  # y方向（垂直梯度）
 
-    def forward(self, L, R, x):
-        # 严格检查尺寸匹配（提前发现问题）
-        assert L.shape == x.shape, f"L尺寸 {L.shape} 与输入x尺寸 {x.shape} 不匹配"
-        assert R.shape == x.shape, f"R尺寸 {R.shape} 与输入x尺寸 {x.shape} 不匹配"
+    def forward(self, L, R, low, gt):
+        # 1. 检查所有输入尺寸是否一致（调试用）
+        assert L.shape == R.shape == low.shape == gt.shape, \
+            f"尺寸不匹配: L={L.shape}, R={R.shape}, low={low.shape}, gt={gt.shape}"
 
-        # 1. 重构损失：L*R ≈ 输入低光图像x
-        recon_loss = self.l1(L * R, x)
+        # 2. 物理一致性损失：low ≈ L ⊙ R（像素-wise乘积）
+        recon_loss = self.l1_loss(L * R, low)
 
-        # 2. 光照平滑损失：光照分量空间变化缓慢
-        l_grad = (torch.abs(L[:, :, 1:, :] - L[:, :, :-1, :])  # 垂直方向梯度
-                  + torch.abs(L[:, :, :, 1:] - L[:, :, :, :-1]))  # 水平方向梯度
-        smooth_loss = l_grad.mean()
+        # 3. 光照分量平滑损失（使用Sobel卷积计算梯度，保持尺寸）
+        # 扩展Sobel算子以匹配输入通道数
+        B, C = L.shape[0], L.shape[1]
+        sobel_x = self.sobel_x.repeat(C, 1, 1, 1).to(L.device)
+        sobel_y = self.sobel_y.repeat(C, 1, 1, 1).to(L.device)
 
-        # 3. 反射分量非负损失：物理上反射率≥0
-        neg_r_loss = torch.clamp(-R, min=0).mean()
+        # 计算梯度（使用padding='same'保持尺寸）
+        l_grad_x = F.conv2d(L, sobel_x, padding=1, groups=C)  # 水平梯度
+        l_grad_y = F.conv2d(L, sobel_y, padding=1, groups=C)  # 垂直梯度
+        smooth_loss = torch.mean(torch.abs(l_grad_x) + torch.abs(l_grad_y))
+
+        # 4. 反射分量保真损失：R应接近gt/L（避免除零）
+        safe_L = torch.clamp(L, min=0.01)  # 防止除以零
+        reflect_loss = self.l1_loss(R, gt / safe_L)
 
         # 总损失
-        total_loss = recon_loss + 0.1 * smooth_loss + 0.05 * neg_r_loss
-        return self.loss_weight * total_loss
+        total_loss = recon_loss + self.alpha * smooth_loss + self.beta * reflect_loss
+        return total_loss

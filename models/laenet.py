@@ -1,14 +1,13 @@
+"""低光增强网络LAENet（修复尺寸不匹配问题）"""
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from utils.registry import ARCH_REGISTRY
+from basicsr.utils.registry import ARCH_REGISTRY
 from models.modules.iga_block import IGABlock
 
 
 @ARCH_REGISTRY.register()
 class LAENet(nn.Module):
-    """低光增强网络LAENet（修复尺寸不匹配问题）"""
-
     def __init__(self, base_channels=32):
         super().__init__()
         # 编码器（Retinex分解）
@@ -25,7 +24,7 @@ class LAENet(nn.Module):
         self.decompose_L = nn.Sequential(
             nn.Conv2d(base_channels * 2, base_channels, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
-            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True),  # 显式指定align_corners
+            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True),
             nn.Conv2d(base_channels, 3, kernel_size=3, padding=1),
             nn.Sigmoid()  # 光照分量在[0,1]
         )
@@ -52,13 +51,15 @@ class LAENet(nn.Module):
         B, C, H, W = x.shape  # 记录原始尺寸
         retinex_feat = self.retinex_encoder(x)  # 特征提取
 
-        # 分解分量并强制上采样至原始尺寸（核心修复）
+        # 分解分量并强制上采样至原始尺寸（核心修复：确保尺寸严格匹配）
         L = self.decompose_L(retinex_feat)
         R = self.decompose_R(retinex_feat)
-        self.L = F.interpolate(L, size=(H, W), mode='bilinear', align_corners=True)  # 确保与输入同尺寸
+
+        # 关键修复：使用align_corners=True确保上采样尺寸精确匹配
+        self.L = F.interpolate(L, size=(H, W), mode='bilinear', align_corners=True)
         self.R = F.interpolate(R, size=(H, W), mode='bilinear', align_corners=True)
 
-        # 物理约束：光照分量避免过暗（防止反射分量异常）
+        # 物理约束：光照分量避免过暗
         self.L = torch.clamp(self.L, min=0.01, max=1.0)
 
         # 融合输出
