@@ -11,11 +11,11 @@ from train.losses import RetinexPerturbationLoss
 # 配置参数
 config = {
     'data_root': 'C:/Users/ASUS/OneDrive/Desktop/LOLv2',
-    'batch_size': 8,
+    'batch_size': 2,  # 从8降至2（根据GPU显存调整）
     'lr': 1e-4,
     'epochs': 50,
     'save_dir': './checkpoints',
-    'image_size': (256, 256)  # 正方形尺寸，旋转后尺寸不变
+    'image_size': (128, 128)  # 从256x256降至128x128（或192x192）
 }
 
 # 创建保存目录
