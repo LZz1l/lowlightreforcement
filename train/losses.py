@@ -1,57 +1,32 @@
 import torch
 import torch.nn as nn
-# 修正：从项目根目录的utils导入注册器（你的自定义注册器）
-from utils.registry import LOSS_REGISTRY  # 关键修正：去掉basicsr前缀
-# 注意：如果L1Loss等基础损失也在你的项目内，需同步修正路径
-from basicsr.models.losses.losses import L1Loss, PerceptualLoss
+import torch.nn.functional as F
 
-@LOSS_REGISTRY.register()
+
 class RetinexPerturbationLoss(nn.Module):
-    """Retinex扰动损失：约束光照L和反射R的物理合理性"""
+    """Retinex理论损失函数（带尺寸检查）"""
 
     def __init__(self, loss_weight=1.0):
-        super(RetinexPerturbationLoss, self).__init__()
+        super().__init__()
         self.loss_weight = loss_weight
-        self.l1 = L1Loss()
+        self.l1 = nn.L1Loss()
 
     def forward(self, L, R, x):
-        """
-        Args:
-            L: 光照分量 [B, 3, H, W]
-            R: 反射分量 [B, 3, H, W]
-            x: 输入低光图像 [B, 3, H, W]
-        """
-        # 1. 约束 L * R ≈ x（低光图像生成公式）
+        # 严格检查尺寸匹配（提前发现问题）
+        assert L.shape == x.shape, f"L尺寸 {L.shape} 与输入x尺寸 {x.shape} 不匹配"
+        assert R.shape == x.shape, f"R尺寸 {R.shape} 与输入x尺寸 {x.shape} 不匹配"
+
+        # 1. 重构损失：L*R ≈ 输入低光图像x
         recon_loss = self.l1(L * R, x)
 
-        # 2. 约束光照L平滑（低光图像光照变化缓慢）
-        l_grad = torch.abs(L[:, :, 1:, :] - L[:, :, :-1, :]) + torch.abs(L[:, :, :, 1:] - L[:, :, :, :-1])
+        # 2. 光照平滑损失：光照分量空间变化缓慢
+        l_grad = (torch.abs(L[:, :, 1:, :] - L[:, :, :-1, :])  # 垂直方向梯度
+                  + torch.abs(L[:, :, :, 1:] - L[:, :, :, :-1]))  # 水平方向梯度
         smooth_loss = l_grad.mean()
 
-        # 3. 约束反射R非负（物理意义：反射率≥0）
+        # 3. 反射分量非负损失：物理上反射率≥0
         neg_r_loss = torch.clamp(-R, min=0).mean()
 
-        return self.loss_weight * (recon_loss + 0.1 * smooth_loss + 0.05 * neg_r_loss)
-
-
-@LOSS_REGISTRY.register()
-class DistillationLoss(nn.Module):
-    """蒸馏损失：从教师模型（如Retinexformer）蒸馏知识"""
-
-    def __init__(self, loss_weight=1.0, temperature=2.0):
-        super(DistillationLoss, self).__init__()
-        self.loss_weight = loss_weight
-        self.temperature = temperature  # 蒸馏温度，控制软化程度
-        self.mse = nn.MSELoss()
-
-    def forward(self, student_feat, teacher_feat):
-        """
-        Args:
-            student_feat: 学生模型特征 [B, C, H, W]
-            teacher_feat: 教师模型特征 [B, C, H, W]
-        """
-        # 特征蒸馏（MSE损失）
-        feat_loss = self.mse(student_feat, teacher_feat)
-
-        # 若有输出概率分布，可添加软化后的KL散度损失（根据模型结构扩展）
-        return self.loss_weight * feat_loss
+        # 总损失
+        total_loss = recon_loss + 0.1 * smooth_loss + 0.05 * neg_r_loss
+        return self.loss_weight * total_loss
