@@ -3,7 +3,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 from basicsr.metrics import calculate_psnr, calculate_ssim  # 新增指标计算工具
-
+import numpy as np
 from data.datasets.lolv2_dataset import LOLv2Dataset
 from models.laenet import LAENet
 from train.losses import RetinexLoss
@@ -88,8 +88,15 @@ for epoch in range(config['epochs']):
             # 计算验证指标
             l1_loss = nn.L1Loss()(output, gt).item()
             # 转换为numpy格式计算PSNR/SSIM（需匹配数据范围）
-            output_np = output.detach().cpu().numpy()
-            gt_np = gt.detach().cpu().numpy()
+            output_np = output.detach().cpu().numpy()  # 形状为[B, C, H, W]
+            output_np = np.transpose(output_np, (0, 2, 3, 1))  # 转为[B, H, W, C]
+            output_np = output_np.squeeze(0)  # 移除批次维度（B=1），变为[H, W, C]
+            output_np = (output_np * 255).astype(np.uint8)
+
+            gt_np = gt.detach().cpu().numpy()  # 形状为[B, C, H, W]
+            gt_np = np.transpose(gt_np, (0, 2, 3, 1))  # 转为[B, H, W, C]
+            gt_np = gt_np.squeeze(0)  # 移除批次维度，变为[H, W, C]
+            gt_np = (gt_np * 255).astype(np.uint8)
             psnr = calculate_psnr(output_np, gt_np, crop_border=0)
             ssim = calculate_ssim(output_np, gt_np, crop_border=0)
 

@@ -301,3 +301,4 @@ def calculate_ssim(img1,
         # ssims.append(skimage.metrics.structural_similarity(img1[..., i], img2[..., i], multichannel=False))
 
     return np.array(ssims).mean()
+
